@@ -15,8 +15,8 @@ warn() { echo -e "[ ${nr}WARNING${nc} ] ${1}"; }
 init-env() {
     # Variables
 	msg "Cargando Entorno"
-	source /tmp/vars
-	rm -f /tmp/vars
+	source /MasterTemp/vars
+	rm -f /MasterTemp/vars
 	fstrim -v /
 }
 
@@ -196,20 +196,19 @@ setup-secureboot() {
 	sbctl sign -s /boot/vmlinuz-linux-zen
 	sbctl sign -s /boot/vmlinuz-linux-hardened
 	sbctl sign -s /boot/vmlinuz-linux-lts
-	sbctl sign -s /boot/vmlinuz-linux-lts-fallback
 }
 
 setup-dotfiles() {
 	msg "Configurando Dotfiles"
 	
-	cp -r /tmp/Dotfiles/usr-share/* /usr/share/
+	cp -r /MasterTemp/Dotfiles/usr-share/* /usr/share/
 
-	cp /tmp/Dotfiles/etc/sddm.conf /etc/
+	cp /MasterTemp/Dotfiles/etc/sddm.conf /etc/
 
 	mkdir -p /home/$USERNAME/.config
-	cp -r /tmp/Dotfiles/config/* /home/$USERNAME/.config/
+	cp -r /MasterTemp/Dotfiles/config/* /home/$USERNAME/.config/
 
-	cp -a /tmp/Dotfiles/home/. /home/$USERNAME/
+	cp -a /MasterTemp/Dotfiles/home/. /home/$USERNAME/
 
 	chown -R $USERNAME:$USERNAME /home/$USERNAME
 }
@@ -228,9 +227,9 @@ setup-aur() {
 setup-pkgs() {
 	msg "Instalando paquetes adicionales (Pacman/AUR)."
 	
-	if [[ -f /tmp/pkgs/pacman-pkgs ]]; then
+	if [[ -f /MasterTemp/pkgs/pacman-pkgs ]]; then
 		
-		local pacman_pkgs=($(awk '/^[^#]/ {print $1}' /tmp/pkgs/pacman-pkgs))
+		local pacman_pkgs=($(awk '/^[^#]/ {print $1}' /MasterTemp/pkgs/pacman-pkgs))
 
 		if [[ ${#pacman_pkgs[@]} -gt 0 ]]; then
 			msg "Instalando ${#pacman_pkgs[@]} paquetes (Pacman)..."
@@ -239,11 +238,11 @@ setup-pkgs() {
 			warn "La lista de pacman esta vacia"
 		fi
 	else 
-		err "No se encontro el archivo pacman-pkgs en /tmp/pkgs/"
+		err "No se encontro el archivo pacman-pkgs en /MasterTemp/pkgs/"
 	fi
 
-	if [[ -f /tmp/pkgs/aur-pkgs ]]; then
-		local aur_pkgs=($(awk '/^[^#]/ {print $1}' /tmp/pkgs/aur-pkgs))
+	if [[ -f /MasterTemp/pkgs/aur-pkgs ]]; then
+		local aur_pkgs=($(awk '/^[^#]/ {print $1}' /MasterTemp/pkgs/aur-pkgs))
 
 		if [[ ${#aur_pkgs[@]} -gt 0 ]]; then
 			msg "Instalando ${#aur_pkgs[@]} paquetes (AUR)..."
@@ -252,8 +251,13 @@ setup-pkgs() {
 			warn "La lista de AUR esta vacia"
 		fi
 	else
-		err "No se encontro el archivo aur-pkgs en /tmp/pkgs/"
+		err "No se encontro el archivo aur-pkgs en /MasterTemp/pkgs/"
 	fi
+}
+
+setup-services() {
+	msg "Hablilitando servicios"
+	systemctl enable sddm
 }
 
 
@@ -278,3 +282,5 @@ setup-bootloader
 setup-hardening
 
 setup-secureboot
+
+setup-services
