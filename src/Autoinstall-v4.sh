@@ -349,9 +349,12 @@ sys_setup() {
 	read -p "Ingrese el nombre del usuario [Def: Master]: " USERNAME ; USERNAME=${USERNAME:-Master}
 
 	until [[ -n "$ROOT_PASSWD" && -n "$USER_PASSWD" ]]; do
-		read -ps "Ingrese la contraseña del root: " ROOT_PASSWD
-		read -ps "Ingrese la contraseña del usuario: " USER_PASSWD
+		read -s -p "Ingrese la contraseña del root: " ROOT_PASSWD
 		echo
+
+		read -s -p "Ingrese la contraseña del usuario: " USER_PASSWD
+		echo
+		
 		if [[ -z "$ROOT_PASSWD" || -z "$USER_PASSWD" ]]; then
 			err "No puede haber campos vacios"
 			ROOT_PASSWD=""
