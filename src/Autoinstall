@@ -38,7 +38,6 @@ sys_base_pkgs=(
 	"zsh-completions"
 	"zsh-syntax-highlighting"
 	"zsh-autosuggestions"
-	"zsh-sudo"
 )
 
 pkgs=(
@@ -289,8 +288,9 @@ disk_setup() {
 
 export_vars() {
 	msg "Exportando variables"
-	declare -p TIMEZONE KEYMAP HOSTNAME USERNAME DISK > /mnt/tmp/vars
-	chmod 600 /mnt/tmp/vars
+	mkdir -p /mnt/MasterTemp
+	declare -p TIMEZONE KEYMAP HOSTNAME USERNAME DISK > /mnt/MasterTemp/vars
+	chmod 600 /mnt/MasterTemp
 }
 
 network_persistant() {
@@ -365,17 +365,17 @@ sys_setup() {
 	export_vars
 
 	msg "Cargando dotfiles."
-	cp -r "${MASTER_DIR}/Dotfiles" /mnt/tmp/Dotfiles
+	cp -r "${MASTER_DIR}/Dotfiles" /mnt/MasterTemp/Dotfiles
 
 	msg "Cargando paquetes."
-	cp -r "${MASTER_DIR}/pkgs" /mnt/tmp/pkgs
+	cp -r "${MASTER_DIR}/pkgs" /mnt/MasterTemp/pkgs
 
 	msg "Copiando script de instalacion"
-	cp "${MASTER_DIR}/src/core/setup" /mnt/tmp/setup
-	chmod +x /mnt/tmp/setup
+	cp "${MASTER_DIR}/src/core/setup" /mnt/MasterTemp/setup
+	chmod +x /mnt/MasterTemp/setup
 
 	msg "Instalando sistema"
-	arch-chroot /mnt /tmp/setup
+	arch-chroot /mnt /MasterTemp/setup
 
 	msg "Configurando credenciales"
 	echo "root:$ROOT_PASSWD" | arch-chroot /mnt chpasswd
