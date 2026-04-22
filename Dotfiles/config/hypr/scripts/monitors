@@ -1,0 +1,39 @@
+#!/bin/bash
+
+# --- CONFIGURACIÓN ---
+# ¡Ojo aquí! Asegúrate de que estos sean los nombres reales con 'hyprctl monitors all'
+INTERNAL="eDP-1"
+EXTERNAL="HDMI-A-1"
+
+# Opciones con íconos para que se vea fresa
+options="💻 Solo Laptop\n🖥️ Solo Externo\n↔️ Extender (Derecha)\n🔃 Duplicar (Espejo)"
+
+# --- SELECCIÓN CON FUZZEL ---
+# -d (--dmenu): Modo dmenu (lee de stdin)
+# -p (--prompt): Texto del prompt
+# --lines: Opcional, si quieres limitar el tamaño de la lista (ej. 4 líneas)
+selected=$(echo -e "$options" | fuzzel --dmenu -p "Configurar Pantallas: " --lines 4 --width 30)
+
+# --- LÓGICA DE HYPRLAND ---
+case $selected in
+    "💻 Solo Laptop")
+        hyprctl keyword monitor "$EXTERNAL,disable"
+        hyprctl keyword monitor "$INTERNAL,preferred,auto,1"
+        ;;
+    "🖥️ Solo Externo")
+        hyprctl keyword monitor "$INTERNAL,disable"
+        hyprctl keyword monitor "$EXTERNAL,preferred,auto,1"
+        ;;
+    "↔️ Extender (Derecha)")
+        # Activa el interno en 0x0
+        hyprctl keyword monitor "$INTERNAL,preferred,0x0,1"
+        # Pone el externo automáticamente a la derecha
+        hyprctl keyword monitor "$EXTERNAL,preferred,auto-right,1"
+        ;;
+    "🔃 Duplicar (Espejo)")
+        # Configura el interno
+        hyprctl keyword monitor "$INTERNAL,preferred,auto,1"
+        # El externo copia (mirror) al interno
+        hyprctl keyword monitor "$EXTERNAL,preferred,auto,1,mirror,$INTERNAL"
+        ;;
+esac

@@ -1,0 +1,17 @@
+## 🧠 Interfaz
+set linenumbers         # Muestra números de línea
+set constantshow        # Muestra línea/columna actual
+set indicator           # Barra de progreso al editar archivos largos
+
+## 🎨 Colores
+include "/usr/share/nano/*.nanorc"  # Activa resaltado de sintaxis para muchos tipos de archivo
+include "/usr/share/nano/nanorc.d/*.nanorc"
+
+## 🖱️ Comportamiento
+set mouse               # Permite usar el mouse para mover el cursor
+set tabsize 4           # Tamaño de tabulaciones
+set autoindent          # Mantiene indentación al crear nuevas líneas
+set smarthome           # Home salta al primer carácter no vacío
+
+## 💾 Seguridad
+set backup              # Guarda copia de seguridad al editar

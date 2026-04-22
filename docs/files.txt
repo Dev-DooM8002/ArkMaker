@@ -1,0 +1,43 @@
+bk:
+    (.config)
+        vpn
+        Proton
+        age
+    (Home)
+    credentials-proton-vpn.gpg
+    vmware
+    .local/bin/
+    .ssh
+    .Projects
+    .Media
+    .Downloads
+    .Courses
+
+Rutas:
+   (.config)
+       :Base:
+       	kitty
+	    powerlevel10k
+	    nvim
+
+       :Waylan (hyprland)
+	    hypr
+	    waybar
+	    fuzzel
+	    mpv (posiblemente)
+
+
+
+   (Home)
+   	.zshrc
+	.p10k.zsh
+	.nanorc
+
+
+    (otros)
+        /usr/share/nano/
+        /usr/share/backgrounds/
+        /usr/share/zsh/plugins/
+        /usr/share/sddm/themes
+
+        /etc/sddm.conf

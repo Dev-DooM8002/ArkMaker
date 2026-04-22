@@ -1,0 +1,280 @@
+#!/usr/bin/env bash
+
+# -- VARIABLES --
+gn='\033[0;32m'
+rd='\033[0;31m'
+nr='\033[38;2;255;165;0m'
+nc='\033[0m'
+
+msg()  { echo -e ":: ${1} ::"; }
+ok()   { echo -e "[ ${gn}OK${nc} ] ${1}"; }
+err()  { echo -e "[ ${rd}ERROR${nc} ] ${1}"; }
+warn() { echo -e "[ ${nr}WARNING${nc} ] ${1}"; }
+
+# -- FUNCTIONS --
+init-env() {
+    # Variables
+	msg "Cargando Entorno"
+	source /tmp/vars
+	rm -f /tmp/vars
+	fstrim -v /
+}
+
+setup-base() {
+	msg "Configurando Sistema Base"
+	ln -sf /usr/share/zoneinfo/$TIMEZONE /etc/localtime
+	hwclock --systohc
+
+	sed -i 's/#es_MX.UTF-8 UTF-8/es_MX.UTF-8 UTF-8/' /etc/locale.gen
+    echo "LANG=es_MX.UTF-8" > /etc/locale.conf
+	locale-gen
+	echo "KEYMAP=$KEYMAP" > /etc/vconsole.conf
+	echo "$HOSTNAME" > /etc/hostname
+
+	echo "127.0.0.1   localhost" > /etc/hosts
+	echo "::1         localhost" >> /etc/hosts
+	echo "127.0.1.1   ${HOSTNAME}.localdomain ${HOSTNAME}" >> /etc/hosts
+
+}
+
+setup-users() {
+	msg "Configurando Usuarios y Permisos"
+    chsh -s /bin/zsh root
+	useradd -m -G wheel,audio,video,optical,storage -s /bin/zsh $USERNAME
+
+
+	echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/wheel
+	chmod 440 /etc/sudoers.d/wheel
+}
+
+setup-initramfs() {
+	msg "Generando Initramfs"
+	sed -i 's/^[[:space:]]*HOOKS=.*/HOOKS=(base systemd autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt filesystems resume fsck)/' /etc/mkinitcpio.conf
+	mkinitcpio -P
+}
+
+setup-bootloader() {
+	msg "Configurando Bootloader"
+	bootctl install
+
+	PART_UUID=$(blkid -s UUID -o value ${DISK}2)
+	RESUME_OFFSET=$(btrfs inspect-internal map-swapfile -r /swap/swapfile)
+
+	{
+		echo "default arch-zen.conf"
+		echo "timeout 3"
+		echo "console-mode max"
+		echo "editor no"
+	} > /boot/loader/loader.conf
+
+	{
+	echo "title   Arch Linux (Zen Kernel)"
+	echo "linux   /vmlinuz-linux-zen"
+	echo "initrd  /intel-ucode.img"
+	echo "initrd  /initramfs-linux-zen.img"
+	echo "options rd.luks.name=$PART_UUID=cryptroot root=/dev/mapper/cryptroot rootflags=subvol=@ rw resume=/dev/mapper/cryptroot resume_offset=$RESUME_OFFSET lsm=landlock,lockdown,yama,apparmor,bpf page_alloc.shuffle=1 randomize_kstack_offset=on vsyscall=none debugfs=off"
+	} > /boot/loader/entries/arch-zen.conf
+
+	{
+	echo "title   Arch Linux (Hardened Kernel - Endurance)"
+	echo "linux   /vmlinuz-linux-hardened"
+	echo "initrd  /intel-ucode.img"
+	echo "initrd  /initramfs-linux-hardened.img"
+	echo "options rd.luks.name=$PART_UUID=cryptroot root=/dev/mapper/cryptroot rootflags=subvol=@ rw resume=/dev/mapper/cryptroot resume_offset=$RESUME_OFFSET lsm=landlock,lockdown,yama,apparmor,bpf slab_nomerge init_on_alloc=1 init_on_free=1 page_alloc.shuffle=1 randomize_kstack_offset=on vsyscall=none debugfs=off"
+	} > /boot/loader/entries/arch-hardened.conf
+
+	{
+	echo "title   Arch Linux (LTS Kernel - Rescue)"
+	echo "linux   /vmlinuz-linux-lts"
+	echo "initrd  /intel-ucode.img"
+	echo "initrd  /initramfs-linux-lts.img"
+	echo "options rd.luks.name=$PART_UUID=cryptroot root=/dev/mapper/cryptroot rootflags=subvol=@ rw resume=/dev/mapper/cryptroot resume_offset=$RESUME_OFFSET lsm=landlock,lockdown,yama,apparmor,bpf slab_nomerge init_on_alloc=1 init_on_free=1 page_alloc.shuffle=1 randomize_kstack_offset=on vsyscall=none debugfs=off"
+	} > /boot/loader/entries/arch-lts.conf
+
+	{
+	echo "title   Arch Linux (RESCUE SYSTEM - LTS Fallback)"
+	echo "linux   /vmlinuz-linux-lts"
+	echo "initrd  /intel-ucode.img"
+	echo "initrd  /initramfs-linux-lts-fallback.img"
+	echo "options rd.luks.name=$PART_UUID=cryptroot root=/dev/mapper/cryptroot rootflags=subvol=@ rw resume=/dev/mapper/cryptroot resume_offset=$RESUME_OFFSET lsm=landlock,lockdown,yama,apparmor,bpf slab_nomerge init_on_alloc=1 init_on_free=1 page_alloc.shuffle=1 randomize_kstack_offset=on vsyscall=none debugfs=off"
+	} > /boot/loader/entries/arch-lts-fallback.conf
+}
+
+setup-hardening() {
+	msg "Aplicando Hardening (Sysctl, Nftables, USBGuard)"
+
+	systemctl enable apparmor nftables usbguard
+
+	{
+	    printf '%s\n' '# 1. Proteccion contra SYN Flood'
+	    printf '%s\n' 'net.ipv4.tcp_syncookies = 1'
+	    printf '%s\n' ''
+	    printf '%s\n' '# 2. Deshabilitar IP Forwarding (Evita que sea router)'
+	    printf '%s\n' 'net.ipv4.ip_forward = 0'
+	    printf '%s\n' 'net.ipv6.conf.all.forwarding = 0'
+	    printf '%s\n' ''
+	    printf '%s\n' '# 3. Proteccion contra ICMP Flood'
+	    printf '%s\n' 'net.ipv4.icmp_echo_ignore_all = 1'
+	    printf '%s\n' ''
+	    printf '%s\n' '# 4. Proteccion contra Smurf Attacks'
+	    printf '%s\n' 'net.ipv4.icmp_echo_ignore_broadcasts = 1'
+	    printf '%s\n' ''
+	    printf '%s\n' '# 5. Deshabilitar IP Spoofing'
+	    printf '%s\n' 'net.ipv4.conf.all.rp_filter = 1'
+	    printf '%s\n' 'net.ipv4.conf.default.rp_filter = 1'
+	    printf '%s\n' ''
+	    printf '%s\n' '# 6. Deshabilitar redirecciones'
+	    printf '%s\n' 'net.ipv4.conf.all.accept_redirects = 0'
+	    printf '%s\n' 'net.ipv4.conf.default.accept_redirects = 0'
+	    printf '%s\n' 'net.ipv6.conf.all.accept_redirects = 0'
+	    printf '%s\n' 'net.ipv6.conf.default.accept_redirects = 0'
+	    printf '%s\n' ''
+	    printf '%s\n' '# 7. Deshabilitar Source Routing'
+	    printf '%s\n' 'net.ipv4.conf.all.accept_source_route = 0'
+	    printf '%s\n' 'net.ipv4.conf.default.accept_source_route = 0'
+	    printf '%s\n' 'net.ipv6.conf.all.accept_source_route = 0'
+	    printf '%s\n' 'net.ipv6.conf.default.accept_source_route = 0'
+	    printf '%s\n' ''
+	    printf '%s\n' '# 8. Deshabilitar logueo de paquetes dropados (Opcional)'
+	    printf '%s\n' '# net.ipv4.conf.all.log_martians = 0'
+	    printf '%s\n' ''
+	    printf '%s\n' '# 9. Aumentar el tamaño del buffer de red (Opcional)'
+	    printf '%s\n' '# net.core.rmem_max = 16777216'
+	    printf '%s\n' '# net.core.wmem_max = 16777216'
+	} > /etc/sysctl.d/99-hardening.conf
+	
+	sysctl --system
+
+	{
+	    printf '%s\n' '#!/usr/bin/nft -f'
+	    printf '%s\n' ''
+	    printf '%s\n' 'flush ruleset'
+	    printf '%s\n' ''
+	    printf '%s\n' 'table inet filter {'
+	    printf '%s\n' '    set blackhole {'
+	    printf '%s\n' '        type ipv4_addr'
+	    printf '%s\n' '        flags timeout'
+	    printf '%s\n' '    }'
+	    printf '%s\n' ''
+	    printf '%s\n' '    chain input {'
+	    printf '%s\n' '        type filter hook input priority 0; policy drop;'
+	    printf '%s\n' '        '
+	    printf '%s\n' '        iif "lo" accept'
+	    printf '%s\n' '        ct state invalid drop'
+	    printf '%s\n' '        ct state established,related accept'
+	    printf '%s\n' ''
+	    printf '%s\n' '        # Proteccion ICMP'
+	    printf '%s\n' '        ip protocol icmp icmp type echo-request limit rate 10/second accept'
+	    printf '%s\n' '        ip6 protocol icmpv6 icmpv6 type echo-request limit rate 10/second accept'
+	    printf '%s\n' ''
+	    printf '%s\n' '        # Proteccion SYN Flood'
+	    printf '%s\n' '        tcp flags & (fin | syn | rst | ack) == syn ct state new limit rate 10/second accept'
+	    printf '%s\n' ''
+	    printf '%s\n' '        # Puertos (descomenta segun necesites)'
+	    printf '%s\n' '        # tcp dport { 80, 443 } accept'
+	    printf '%s\n' ''
+	    printf '%s\n' '        limit rate 3/minute log prefix "[NFT] INPUT DROP: "'
+	    printf '%s\n' '    }'
+	    printf '%s\n' '    chain forward {'
+	    printf '%s\n' '        type filter hook forward priority 0; policy drop;'
+	    printf '%s\n' '    }'
+	    printf '%s\n' '    chain output {'
+	    printf '%s\n' '        type filter hook output priority 0; policy accept;'
+	    printf '%s\n' '    }'
+	    printf '%s\n' '}'
+	} > /etc/nftables.conf
+
+	usbguard generate-policy > /etc/usbguard/rules.conf
+}
+
+setup-secureboot() {
+	msg "Firmando binarios (Secure Boot)"
+	sbctl create-keys
+	sbctl enroll-keys -m
+	sbctl sign -s /boot/EFI/systemd/systemd-bootx64.efi
+	sbctl sign -s /boot/EFI/BOOT/BOOTX64.EFI
+	sbctl sign -s /boot/vmlinuz-linux-zen
+	sbctl sign -s /boot/vmlinuz-linux-hardened
+	sbctl sign -s /boot/vmlinuz-linux-lts
+	sbctl sign -s /boot/vmlinuz-linux-lts-fallback
+}
+
+setup-dotfiles() {
+	msg "Configurando Dotfiles"
+	
+	cp -r /tmp/Dotfiles/usr-share/* /usr/share/
+
+	cp /tmp/Dotfiles/etc/sddm.conf /etc/
+
+	mkdir -p /home/$USERNAME/.config
+	cp -r /tmp/Dotfiles/config/* /home/$USERNAME/.config/
+
+	cp -a /tmp/Dotfiles/home/. /home/$USERNAME/
+
+	chown -R $USERNAME:$USERNAME /home/$USERNAME
+}
+
+setup-aur() {
+	msg "Configurando helper AUR (Paru)"
+
+	sudo -u $USERNAME bash -c '
+			cd /tmp
+			git clone https://aur.archlinux.org/paru-bin.git
+			cd paru-bin
+			makepkg -si --noconfirm
+	'
+}
+
+setup-pkgs() {
+	msg "Instalando paquetes adicionales (Pacman/AUR)."
+	
+	if [[ -f /tmp/pkgs/pacman-pkgs ]]; then
+		
+		local pacman_pkgs=($(awk '/^[^#]/ {print $1}' /tmp/pkgs/pacman-pkgs))
+
+		if [[ ${#pacman_pkgs[@]} -gt 0 ]]; then
+			msg "Instalando ${#pacman_pkgs[@]} paquetes (Pacman)..."
+			pacman -S --needed --noconfirm "${pacman_pkgs[@]}"
+		else
+			warn "La lista de pacman esta vacia"
+		fi
+	else 
+		err "No se encontro el archivo pacman-pkgs en /tmp/pkgs/"
+	fi
+
+	if [[ -f /tmp/pkgs/aur-pkgs ]]; then
+		local aur_pkgs=($(awk '/^[^#]/ {print $1}' /tmp/pkgs/aur-pkgs))
+
+		if [[ ${#aur_pkgs[@]} -gt 0 ]]; then
+			msg "Instalando ${#aur_pkgs[@]} paquetes (AUR)..."
+			sudo -u $USERNAME paru -S --needed --noconfirm "${aur_pkgs[@]}"
+		else
+			warn "La lista de AUR esta vacia"
+		fi
+	else
+		err "No se encontro el archivo aur-pkgs en /tmp/pkgs/"
+	fi
+}
+
+
+
+# -- MAIN --
+init-env
+
+setup-base
+
+setup-users
+
+setup-aur
+
+setup-dotfiles
+
+setup-pkgs
+
+setup-initramfs
+
+setup-bootloader
+
+setup-hardening
+
+setup-secureboot

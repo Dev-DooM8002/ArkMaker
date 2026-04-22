@@ -1,0 +1,62 @@
+#!/bin/bash
+
+
+#!/bin/bash
+
+options="  Apagar
+  Reiniciar
+  Suspender
+  Bloquear
+  Cerrar sesión
+󰜺  Cancelar"
+
+choice=$(printf "%s" "$options" | fuzzel \
+                                        --dmenu \
+                                        --lines=6 \
+                                        --width=17 \
+                                        --inner-pad=5 \
+                                        --placeholder="" \
+                                        --anchor=top-right \
+                                        --x-margin=20 \
+                                        --y-margin=20 
+)
+
+case "$choice" in
+    "  Apagar") systemctl poweroff ;;
+    "  Reiniciar") systemctl reboot ;;
+    "  Suspender") systemctl suspend ;;
+    "  Bloquear") hyprlock ;;
+    "  Cerrar sesión") hyprctl dispatch exit ;;
+    *) exit 0 ;;
+esac
+
+
+
+
+# options="   Apagar
+#    Reiniciar
+#    Suspender
+#    Bloquear
+#    Cerrar sesión
+# 󰜺   Cancelar"
+
+# choice=$(printf "%s" "$options" | fuzzel \
+#                                         --dmenu \
+#                                         --lines=6 \
+#                                         --width=17 \
+#                                         --inner-pad=5 \
+#                                         --placeholder="" \
+#                                         --anchor=top-right \
+#                                         --x-margin=20 \
+#                                         --y-margin=20 
+# )
+
+# case "$choice" in
+#     "    Apagar") systemctl poweroff ;;
+#     "    Reiniciar") systemctl reboot ;;
+#     "    Suspender") systemctl suspend ;;
+#     "    Bloquear") hyprlock ;;
+#     "    Cerrar sesión") hyprctl dispatch exit ;;
+#     *) exit 0 ;;
+# esac
+

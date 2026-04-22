@@ -1,0 +1,435 @@
+# -- VARIABLES --
+
+MASTER_DIR="$HOME/ArkMaker"
+
+gn='\033[0;32m'
+rd='\033[0;31m'
+nr='\033[38;2;255;165;0m'
+nc='\033[0m'
+
+sys_base_pkgs=(
+	"base"
+	"base-devel"
+	"linux-hardened"
+	"linux-hardened-headers"
+	"linux-zen"
+	"linux-zen-headers"
+	"linux-lts"
+	"linux-lts-headers"
+	"linux-firmware"
+
+	"mesa"
+	"intel-media-driver"
+	"vulkan-intel"
+	"intel-ucode"
+
+	"btrfs-progs"
+	"cryptsetup"
+
+	"sbctl"
+	"networkmanager"
+	"apparmor"
+	"nftables"
+	"usbguard"
+	"sudo"
+	"nano"
+	"vim"
+	"zsh"
+	"zsh-completions"
+	"zsh-syntax-highlighting"
+	"zsh-autosuggestions"
+	"zsh-sudo"
+)
+
+pkgs=(
+	"hyprland"
+	"xdg-desktop-portal-hyprland"
+	"qt5-wayland"
+	"qt6-wayland"
+	"hyprpolkitagent"
+
+	"kitty"
+	"waybar"
+	"fuzzel"
+	"hyprpaper"
+	"hyprlock"
+	"dunst" # swaync
+	"grim"
+	"slurp"	
+)
+
+SSID=""
+PASSPH=""
+
+SWAP_SIZE=""
+
+TIMEZONE="America/Mexico_City"
+KEYMAP="us"
+HOSTNAME="ARKA"
+ROOT_PASSWD=""
+USERNAME="Master"
+USER_PASSWD=""
+
+MAP_PART="/dev/mapper/cryptroot"
+MNT_OPT="rw,noatime,compress=zstd:3,ssd,space_cache=v2"
+
+
+# -- UTILS --
+msg()  { echo -e ":: ${1} ::"; }
+ok()   { echo -e "[ ${gn}OK${nc} ] ${1}"; }
+err()  { echo -e "[ ${rd}ERROR${nc} ] ${1}"; }
+warn() { echo -e "[ ${nr}WARNING${nc} ] ${1}"; }
+
+validation() {
+    if [[ ! $1 =~ ^[Yy]$ ]]; then
+        err "Abortando instalacion."
+        err "Bye."
+        exit 1
+    fi
+}
+
+connect_to_wifi() {
+  echo ":: Verificando existencia de conexion a internet previa ::"
+  if ping -c 1 archlinux.org &>/dev/null; then
+    ok "Conexion previa existente."
+  else
+    while true; do
+		msg "Conexion previa no detectada"
+      	msg "Iniciando conexion temporal a internet"
+      	msg "Buscando tarjetas de red"
+
+      	DEVICE=$(iwctl device list | awk 'NR>4 {print $1; exit}')
+
+      	if [ -z "$DEVICE" ]; then
+      	  err "No se encontraron tarjetas de red"
+      	  exit 1
+      	fi
+
+      	msg "Tarjeta(s) de red encontrada(s): $DEVICE"
+
+      	msg "Escaneando redes Wi-Fi disponibles"
+      	iwctl station $DEVICE scan
+      	sleep 6
+
+      	msg "Redes Wi-Fi disponibles"
+      	iwctl station $DEVICE get-networks
+
+      	read -p "Ingrese el nombre de la red (SSID) a la que deseas conectarte: " SSID
+      	read -s -p "Ingrese la clave de la red: " PASSPH
+
+      	msg "Intentando establecer conexion con '$SSID'... "
+      	iwctl station $DEVICE connect "$SSID" --passphrase "$PASSPH"
+      	sleep 4
+
+      	if ! ping -c 1 archlinux.org &>/dev/null; then
+      	  err "La conexion fallo, revise la red o clave."
+      	else
+      	  ok "Conexion establecida exitosamente con '$SSID'"
+      	  msg "Conexion temporal a internet establecida"
+      	  return 0
+      	fi
+
+      	read -p "Desea volver a intentar?? [Y/n]: " CONFIRM
+		validation $CONFIRM
+    done
+  fi
+}
+
+validating_disk() {
+	msg "Buscando discos disponibles"
+
+	RAW_DISK_LIST=$(lsblk -dpno KNAME,SIZE,MODEL)
+
+	if [[ -z "$RAW_DISK_LIST" ]]; then
+	    err "No se encontraron discos"
+	    exit 1
+	fi
+
+	DISK_SELECTION=$(echo "$RAW_DISK_LIST" | fzf \
+		--height 40% \
+		--layout=reverse \
+		--border \
+		--prompt="Seleccione el disco a usar: " \
+		--header="[ UP/DOWN: Moverse | ENTER: Confirmar ]" \
+		--pointer=">" \
+		--marker="*" \
+		--color=bw \
+		--preview "lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT {1}" \
+		--preview-window=right:50%:wrap)
+
+	if [[ -z "$DISK_SELECTION" ]]; then
+	    err "No se ha seleccionado ningun disco"
+	    exit 1
+	fi
+
+	DISK=$(echo "$DISK_SELECTION" | awk '{print $1}')
+
+	if [ -z "$DISK" ]; then
+		err "No se ha seleccionado ningun disco"
+		exit 1
+	fi
+
+	msg "Disco seleccionado: '$DISK'"
+
+	msg "Validando existencia de particiones previas"
+	MOUNTED_PARTS=$(lsblk -nrpo NAME,MOUNTPOINT | grep "^${DISK}" | awk '$2 != "" {print $1}')
+
+	if [[ -n "$MOUNTED_PARTS" ]]; then
+		warn "Se detectaron particiones montadas en '$DISK':"
+		echo "$MOUNTED_PARTS"
+
+		read -p "Desea desmontar y continuar ?? [Y/n]: " CONFIRM
+		validation $CONFIRM
+
+		for part in $MOUNTED_PARTS; do
+			msg "Desmontando: $part"
+			umount -lf "$part"
+		done
+		ok "Todas las particiones desmontadas correctamente."
+	fi
+
+	msg ":: Verificando estado de seguridad del disco ::"
+	if sudo hdparm -I $DISK |grep -q "frozen"; then
+		err "El disco esta FROZEN. Suspenda la pc y despiertela para desbloquearlo."
+		exit 1
+	fi
+}
+
+calc_swap() {
+	msg ":: Detectando 'RAM' total disponible ::"
+	RAM_GB=$(free -m | awk '/^Mem:/ {print int($2 / 1024)}')
+	msg "RAM total detectada: $RAM_GB (GiB)"
+
+	msg ":: Calculando tamaño de swap ::"
+	SWAP_SIZE=$(awk -v ram="$RAM_GB" 'BEGIN { print int((ram + sqrt(ram)) * 1024) }')
+	msg "Tamaño de swap calculado: $SWAP_SIZE (MiB)"
+}
+
+disk_setup() {
+	warn "Las operaciones posteriores sobre el disco: '$DISK' seran irreversibles."
+	read -p "Desea continuar ?? [Y/n]: " CONFIRM
+	validation $CONFIRM
+
+
+	msg "Iniciando limpieza del disco"
+
+	sudo wipefs --all --force $DISK
+
+	msg "Ejecutando ATA Secure Erase"
+	sudo hdparm --user-master u --security-set-pass p $DISK
+	sudo hdparm --user-master u --security-erase p $DISK
+	
+    msg "Zapeando tabla de particiones"
+	sudo sgdisk --zap-all $DISK
+
+	msg "Eliminando metadatos de sistema de archivos"
+	sudo blkdiscard $DISK
+
+	msg "Creando nueva tabla de particiones y particiones"
+	sudo parted --script $DISK \
+	    mklabel gpt \
+	    mkpart "ESP" fat32 1MiB 1025MiB \
+	    set 1 esp on \
+	    mkpart "primary" btrfs 1025MiB 100%
+	
+	sudo partprobe $DISK
+	sleep 2
+
+	msg "Cifrando particion" 
+	cryptsetup luksFormat --type luks2 ${DISK}2
+	cryptsetup open ${DISK}2 cryptroot
+
+	msg "Formateando particiones"
+	mkfs.fat -F32 ${DISK}1
+	mkfs.btrfs ${MAP_PART}
+
+	msg "Creando subvolumenes btrfs"
+	mount ${MAP_PART} /mnt
+	btrfs subvolume create /mnt/@
+	btrfs subvolume create /mnt/@home
+	btrfs subvolume create /mnt/@snapshots
+	btrfs subvolume create /mnt/@log
+	btrfs subvolume create /mnt/@pkg
+	btrfs subvolume create /mnt/@swap
+	umount /mnt
+
+	msg "Montando sistema"
+	mount -o noatime,compress=zstd:1,space_cache=v2,subvol=@ ${MAP_PART} /mnt
+
+	msg "Creando puntos de montaje"
+	mkdir -pv /mnt/{home,boot,.snapshots,var/log,var/cache/pacman/pkg,swap}
+
+	msg "Montando subvolumenes base"
+	mount -o subvol=@home,$MNT_OPT ${MAP_PART} /mnt/home
+	mount -o subvol=@snapshots,$MNT_OPT ${MAP_PART} /mnt/.snapshots
+	mount -o subvol=@log,$MNT_OPT ${MAP_PART} /mnt/var/log
+	mount -o subvol=@pkg,$MNT_OPT ${MAP_PART} /mnt/var/cache/pacman/pkg
+	mount -o subvol=@swap,$MNT_OPT,compress=no ${MAP_PART} /mnt/swap
+
+	msg "Montando EFI Part"
+	mount ${DISK}1 /mnt/boot
+
+	msg "Configurando atributos No-COW"
+	chattr +C /mnt/swap
+	chattr +C /mnt/var/log
+	chattr +C /mnt/var/cache/pacman/pkg
+
+	msg "Creando Swapfile para hibernacion"
+	dd if=/dev/zero of=/mnt/swap/swapfile bs=1M count=$SWAP_SIZE status=progress
+	chmod 600 /mnt/swap/swapfile
+	mkswap /mnt/swap/swapfile
+	swapon /mnt/swap/swapfile
+
+
+	msg "Instalando paquetes esenciales"
+	
+
+	
+}
+
+export_vars() {
+	msg "Exportando variables"
+	declare -p TIMEZONE KEYMAP HOSTNAME USERNAME DISK > /mnt/tmp/vars
+	chmod 600 /mnt/tmp/vars
+}
+
+network_persistant() {
+	msg "Configurando red persistente."
+	arch-chroot /mnt systemctl enable NetworkManager
+	NM_FILE="/mnt/etc/NetworkManager/system-connections/${SSID}.nmconnection"
+
+	{
+	    printf "%s\n" "[connection]"
+	    printf "%s\n" "id=${SSID}"
+	    printf "%s\n" "uuid=$(uuidgen)"
+	    printf "%s\n" "type=wifi"
+	    printf "%s\n" ""
+	    printf "%s\n" "[wifi]"
+	    printf "%s\n" "mode=infrastructure"
+	    printf "%s\n" "ssid=${SSID}"
+	    printf "%s\n" ""
+	    printf "%s\n" "[wifi-security]"
+	    printf "%s\n" "auth-alg=open"
+	    printf "%s\n" "key-mgmt=wpa-psk"
+	    printf "%s\n" "psk=${PASSPH}"
+	    printf "%s\n" ""
+	    printf "%s\n" "[ipv4]"
+	    printf "%s\n" "method=auto"
+	    printf "%s\n" ""
+	    printf "%s\n" "[ipv6]"
+	    printf "%s\n" "addr-gen-mode=stable-privacy"
+	    printf "%s\n" "method=auto"
+	} > "$NM_FILE"
+	chmod 600 "$NM_FILE"
+}
+
+banner() {
+    ban="
+
+    []===================================[]
+    []                                   []
+    []    Bienvenido a Arka-Installer    []
+    []                           by. doom[]
+    []===================================[]
+    
+    "
+    clear
+    echo $ban
+}
+
+
+# -- FUNCIONES --
+sys_setup() {
+	msg "Iniciando configuracion del sistema"
+
+	msg ":: Configurando variables del sistema ::"
+	read -p "Ingrese la zona horaria [Def: America/Mexico_City]: " TIMEZONE ; TIMEZONE=${TIMEZONE:-America/Mexico_City}
+	read -p "Ingrese el idioma [Def: us]: " KEYMAP ; KEYMAP=${KEYMAP:-us}
+	read -p "Ingrese el nombre del host [Def: ARKA]: " HOSTNAME ; HOSTNAME=${HOSTNAME:-ARKA}
+	read -p "Ingrese el nombre del usuario [Def: Master]: " USERNAME ; USERNAME=${USERNAME:-Master}
+
+	until [[ -n "$ROOT_PASSWD" && -n "$USER_PASSWD" ]]; do
+		read -ps "Ingrese la contraseña del root: " ROOT_PASSWD
+		read -ps "Ingrese la contraseña del usuario: " USER_PASSWD
+		echo
+		if [[ -z "$ROOT_PASSWD" || -z "$USER_PASSWD" ]]; then
+			err "No puede haber campos vacios"
+			ROOT_PASSWD=""
+			USER_PASSWD=""
+		fi
+	done
+
+	export_vars
+
+	msg "Cargando dotfiles."
+	cp -r "${MASTER_DIR}/Dotfiles" /mnt/tmp/Dotfiles
+
+	msg "Cargando paquetes."
+	cp -r "${MASTER_DIR}/pkgs" /mnt/tmp/pkgs
+
+	msg "Copiando script de instalacion"
+	cp "${MASTER_DIR}/src/core/setup" /mnt/tmp/setup
+	chmod +x /mnt/tmp/setup
+
+	msg "Instalando sistema"
+	arch-chroot /mnt /tmp/setup
+
+	msg "Configurando credenciales"
+	echo "root:$ROOT_PASSWD" | arch-chroot /mnt chpasswd
+	echo "$USERNAME:$USER_PASSWD" | arch-chroot /mnt chpasswd
+
+	network_persistant
+
+	msg "Instalacion completada"
+	warn "Es necesario reiniciar el sistema"
+	read -p "Reiniciar ahora ?? [Y/n]: " CONFIRM
+	if [[ ! $CONFIRM =~ ^[Yy]$ ]]; then
+		exit 0
+	fi
+
+	swapoff /mnt/swap/swapfile
+	umount -R /mnt
+	cryptsetup close $MAP_PART
+	reboot
+}
+
+
+# -- MAIN --
+
+# 1. Banner
+banner
+
+# 2. Validacion
+warn "Si continua se instalara el 'ARKA' en su disco"
+read -p "Desea continuar ?? [Y/n]: " CONFIRM
+validation $CONFIRM
+
+# 3. Iniciando instalacion
+msg "Arrancando Arka-Installer"
+echo
+
+# 4. Conexion a internet
+connect_to_wifi
+
+# 5. Validacion de disco
+validating_disk
+
+# 6. Calculo de swap
+calc_swap
+
+# 7. Setup de disco
+disk_setup
+
+# 8. Instalacion del sistema base
+pacstrap -K /mnt ${sys_base_pkgs[@]}
+
+# 9. Generacion de fstab
+genfstab -U /mnt >> /mnt/etc/fstab
+
+# 10. Verificacion de fstab
+cat /mnt/etc/fstab
+warn "Verifique que la informacion sea correcta"
+read -p "Presione [Enter] para continuar..."
+
+# 11. Configuracion del sistema
+sys_setup

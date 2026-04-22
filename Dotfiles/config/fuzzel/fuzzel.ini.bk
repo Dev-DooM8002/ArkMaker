@@ -1,0 +1,12 @@
+[main]
+font=monospace:size=12
+width=40
+lines=8
+inner-pad=5
+prompt="Exec: "
+
+[colors]
+background=000000aa
+text=ffffffff
+match=ff8800ff
+selection=333333aa

@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+if pgrep -x hyprpaper > /dev/null; then
+    pkill -x hyprpaper
+fi
+hyprpaper &>/dev/null &
+
+# Reinicia Hyprpaper (fondo de pantalla)
+# if pgrep -x mpvpaper > /dev/null; then
+#     pkill -x mpvpaper
+# fi
+# mpvpaper -o "--loop-file=inf --no-audio --hwdec=vaapi --vo=gpu-next" ALL /home/doom/.config/hypr/wallpapers/anim-wallpaper.mp4 &>/dev/null &
+
+# Reinicia Waybar
+if pgrep -x waybar > /dev/null; then
+    pkill -x waybar
+fi
+waybar &>/dev/null &
+
+# Reinicia Dunst
+if pgrep -x dunst > /dev/null; then
+    pkill -x dunst
+fi
+dunst &>/dev/null &
